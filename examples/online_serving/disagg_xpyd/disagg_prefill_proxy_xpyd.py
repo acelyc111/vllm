@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-
+import logging
 import os
 import random
 import socket
@@ -10,6 +10,9 @@ import aiohttp
 import msgpack
 import zmq
 from quart import Quart, make_response, request
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 prefill_instances: dict[str, str] = {}  # http_address: zmq_address
 decode_instances: dict[str, str] = {}  # http_address: zmq_address
@@ -26,8 +29,8 @@ def _listen_for_register(poller, router_socket):
             # data: {"type": "P", "http_address": "ip:port",
             #        "zmq_address": "ip:port"}
             data = msgpack.loads(message)
-            # print("Received message from %s, data: %s",
-            #              remote_address.decode(), data)
+            logger.debug("Received message from %s, "
+                         "data: %s", remote_address.decode(), data)
             if data["type"] == "P":
                 global prefill_instances
                 global prefill_cv
@@ -41,8 +44,9 @@ def _listen_for_register(poller, router_socket):
                     decode_instances[
                         data["http_address"]] = data["zmq_address"]
             else:
-                print("Unexpected, Received message from %s, data: %s",
-                      remote_address, data)
+                logger.warning(
+                    "Unexpected, Received message from %s, "
+                    "data: %s", remote_address, data)
 
 
 def start_service_discovery(hostname, port):
@@ -107,16 +111,16 @@ async def handle_request():
         with prefill_cv:
             prefill_addr, prefill_zmq_addr = random.choice(
                 list(prefill_instances.items()))
-            print("handle_request, prefill_addr: %s, zmq_addr: %s",
-                  prefill_addr, prefill_zmq_addr)
+            logger.info("handle_request, prefill_addr: %s, "
+                        "zmq_addr: %s", prefill_addr, prefill_zmq_addr)
 
         global decode_instances
         global decode_cv
         with decode_cv:
             decode_addr, decode_zmq_addr = random.choice(
                 list(decode_instances.items()))
-            print("handle_request, decode_addr: %s, zmq_addr: %s", decode_addr,
-                  decode_zmq_addr)
+            logger.info("handle_request, decode_addr: %s, "
+                        "zmq_addr: %s", decode_addr, decode_zmq_addr)
 
         request_id = (
             f"___prefill_addr_{prefill_zmq_addr}___decode_addr_{decode_zmq_addr}_{random_uuid()}"
@@ -135,13 +139,8 @@ async def handle_request():
 
         return response
 
-    except Exception as e:
-        import sys
-        import traceback
-        exc_info = sys.exc_info()
-        print("Error occurred in disagg prefill proxy server")
-        print(e)
-        print("".join(traceback.format_exception(*exc_info)))
+    except Exception:
+        logger.exception("Error occurred in disagg prefill proxy server")
 
 
 if __name__ == '__main__':
